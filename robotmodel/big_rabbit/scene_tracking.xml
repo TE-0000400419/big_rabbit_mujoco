@@ -1,0 +1,10 @@
+<mujoco model="big_rabbit tracking">
+  <!-- 追従性能の測定専用シーン。骨盤を空中に溶接し、接地も転倒も外して
+       PD（実機ではドライバ）の追従だけを残す。
+       big_rabbit_isaac/scripts/check_big_rabbit_reference_tracking.py と同じ条件。 -->
+  <include file="big_rabbit.xml"/>
+
+  <equality>
+    <weld body1="pelvis" relpose="0 0 0.60 1 0 0 0"/>
+  </equality>
+</mujoco>

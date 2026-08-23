@@ -1,0 +1,28 @@
+<mujoco model="big_rabbit scene">
+  <!-- big_rabbit.xml は big_rabbit_isaac/reference_model/big_rabbit_isaac.xml のコピー。
+       Isaac の USD も同じ MJCF から生成しているので、両者のモデルは定義上一致する。
+       床は MJCF 側に入れない方針なので、ここで足す。 -->
+  <include file="big_rabbit.xml"/>
+
+  <visual>
+    <headlight diffuse="0.6 0.6 0.6" ambient="0.3 0.3 0.3" specular="0 0 0"/>
+    <rgba haze="0.15 0.25 0.35 1"/>
+    <!-- offwidth/offheight は動画書き出し（オフスクリーン描画）の上限。既定 640x480 では足りない。 -->
+    <global azimuth="150" elevation="-15" offwidth="1280" offheight="960"/>
+  </visual>
+
+  <asset>
+    <texture type="skybox" builtin="gradient" rgb1="0.3 0.5 0.7" rgb2="0 0 0" width="512" height="3072"/>
+    <texture type="2d" name="groundplane" builtin="checker" mark="edge" rgb1="0.2 0.3 0.4"
+             rgb2="0.1 0.2 0.3" markrgb="0.8 0.8 0.8" width="300" height="300"/>
+    <material name="groundplane" texture="groundplane" texuniform="true" texrepeat="5 5" reflectance="0.1"/>
+  </asset>
+
+  <worldbody>
+    <light pos="0 0 3" dir="0 0 -1" directional="true"/>
+    <!-- 接触フィルタは MJCF 生成時の方針に合わせる。
+         floor 1/1、foot 4/1、その他 body 2/1 なので、胴体・脚は床としか当たらない。 -->
+    <geom name="floor" type="plane" size="0 0 0.05" material="groundplane"
+          contype="1" conaffinity="1" friction="1.0 0.01 0.001"/>
+  </worldbody>
+</mujoco>

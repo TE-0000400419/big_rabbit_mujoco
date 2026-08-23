@@ -1,0 +1,23 @@
+# Build outputs
+build-linux/
+build-*/
+
+# Logs & simulation outputs
+# outputs/ は trace CSV（1 本 5 MB）と qpos CSV が入る。再生成できるので入れない。
+logs/
+outputs/
+
+# 動画（再生成可能。make video）
+videos/
+
+# Python
+__pycache__/
+*.py[cod]
+
+# IDE
+.idea/
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
