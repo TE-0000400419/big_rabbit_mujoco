@@ -1,7 +1,7 @@
 #pragma once
 
 // tools/export_isaac_policy_headers.py が生成。手で編集しないこと。
-// Params: /home/pomiou/work/big_rabbit_isaac/configs/big_rabbit_balance/big_rabbit_walk_v21_stride014_4096_500.params.yaml
+// Params: /home/pomiou/work/big_rabbit_isaac/configs/big_rabbit_balance/big_rabbit_walk_v22_sole56_4096_500.params.yaml
 
 #include <array>
 #include <cstdlib>
@@ -29,7 +29,7 @@ namespace isaac_policy
     inline constexpr float kFootContactThresholdN = 1.000000f;
 
     // 起動時の骨盤高。
-    inline constexpr float kSpawnHeightM = 0.402000f;
+    inline constexpr float kSpawnHeightM = 0.430000f;
 
     inline constexpr std::array<const char *, 10> kJointNames = {
         "left_hip_yaw_joint",

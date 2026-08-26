@@ -62,7 +62,7 @@
                 <joint name="left_ankle_joint" type="hinge" axis="0 0 1" pos="0 0 0" range="-2.094395102 2.094395102" armature="0.01" damping="0.2"/>
                 <inertial pos="0.04477691222 -0.03498664077 0.04017" mass="0.21775" fullinertia="0.0005712828051 0.0002195931749 0.00067714978 -0.0001213503102 -3.368963785e-05 2.307671975e-05"/>
                 <geom type="mesh" mesh="foot_b" material="link" pos="0 0 0.04275" quat="0.7038514018 -0.06777318155 -0.7038514018 -0.06777318155" name="left_foot_visual_0" contype="0" conaffinity="0" group="2" density="0"/>
-                <geom name="left_foot_collision" contype="4" conaffinity="1" group="3" friction="1.0 0.01 0.001" density="0" type="capsule" fromto="0.05175948446 -0.1058203939 0.03475 0.07637384486 0.02080951275 0.03475" size="0.013"/>
+                <geom name="left_foot_collision" contype="4" conaffinity="1" group="3" friction="1.0 0.01 0.001" density="0" type="capsule" fromto="0.06452063784 -0.1083009109 0.03475 0.08913499825 0.01832899581 0.03475" size="0.028"/>
                 <site name="left_foot_contact" pos="0.07290130931 -0.04422272154 0.03475" size="0.006" type="sphere" quat="0.7038514018 -0.06777318155 -0.7038514018 -0.06777318155"/>
               </body>
             </body>
@@ -97,7 +97,7 @@
                 <joint name="right_ankle_joint" type="hinge" axis="0 0 -1" pos="0 0 0" range="-2.094395102 2.094395102" armature="0.01" damping="0.2"/>
                 <inertial pos="0.04477691222 0.03498664077 0.04017" mass="0.21775" fullinertia="0.0005712821551 0.0002195925249 0.00067714978 0.0001213503102 -3.368896894e-05 -2.307596833e-05"/>
                 <geom type="mesh" mesh="foot_a" material="link" pos="0 0 0.04275" quat="-0.06777318155 -0.7038514018 -0.06777318155 0.7038514018" name="right_foot_visual_0" contype="0" conaffinity="0" group="2" density="0"/>
-                <geom name="right_foot_collision" contype="4" conaffinity="1" group="3" friction="1.0 0.01 0.001" density="0" type="capsule" fromto="0.05175948446 0.1058203939 0.03475 0.07637384486 -0.02080951275 0.03475" size="0.013"/>
+                <geom name="right_foot_collision" contype="4" conaffinity="1" group="3" friction="1.0 0.01 0.001" density="0" type="capsule" fromto="0.06452063784 0.1083009109 0.03475 0.08913499825 -0.01832899581 0.03475" size="0.028"/>
                 <site name="right_foot_contact" pos="0.07290130931 0.04422272154 0.03475" size="0.006" type="sphere" quat="-0.06777318155 -0.7038514018 -0.06777318155 0.7038514018"/>
               </body>
             </body>

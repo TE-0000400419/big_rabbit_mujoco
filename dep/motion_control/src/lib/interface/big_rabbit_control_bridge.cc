@@ -33,7 +33,7 @@ namespace
     // previous_action が 2 step 前、current_action が 1 step 前。初回はどちらもゼロ。
     std::array<float, BigRabbitControlBridge::kJointAxisNum> g_previous_action{};
     std::array<float, BigRabbitControlBridge::kJointAxisNum> g_current_action{};
-}  // namespace
+} // namespace
 
 namespace
 {
@@ -48,12 +48,12 @@ namespace
     {
         return {
             big_rabbit::sensor::FootContactFromForce(g_control_info.foot_force_n[0],
-                                                    isaac_policy::kFootContactThresholdN),
+                                                     isaac_policy::kFootContactThresholdN),
             big_rabbit::sensor::FootContactFromForce(g_control_info.foot_force_n[1],
-                                                    isaac_policy::kFootContactThresholdN),
+                                                     isaac_policy::kFootContactThresholdN),
         };
     }
-}  // namespace
+} // namespace
 
 void BigRabbitControlBridge::Initialize() noexcept
 {
@@ -200,6 +200,30 @@ void BigRabbitControlBridge::ExecuteRLControl(long long step_count, bool reset) 
 {
     // policy 1 step 分。直前に sim_main が SetSensorDataJoint() と
     // SetIsaacPolicySensorData() を呼んでいる前提で、最新センサから obs54 を作る。
+
+    /*
+    ◆追加モジュール検討
+    ★pinocchioでやってみるか？
+    ・ロボットモデル（２段階目）
+        floating baseのロボットモデルを保持しておく
+        set jointangleで各関節角度を入れる
+        set jointvelocityで各関節速度を入れる
+        胴体姿勢、並進位置はどうしておく？？
+        set jointforce で関節トルクを入れる
+
+    ・RobotUpdate（２段階目）
+        ロボットモデルの更新
+
+    ・EstimateContact（1段階目）
+        ※まず実機実験を優先するため、最小構成で書く。
+        トルク値から床反力を取り、しきい値以上だと接触とする
+        ベース基準、足裏のヤコビ行列が取れればよい
+
+    ・EstimateHeight（1段階目）
+        ※まず実機実験を優先するため、最小構成で書く
+        接触と関節角度、ベース角度から、ベースの高度を推定
+
+    */
 
     if (reset)
     {

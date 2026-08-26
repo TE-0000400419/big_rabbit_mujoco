@@ -29,6 +29,8 @@ import numpy as np
 # あちらの条件を揃えるまでに 2 つ直した。
 #   - MJCF の timestep 0.002 をそのまま使っていた（Isaac は 1 kHz）
 #   - data.ctrl に関節側トルクを書いていた（MuJoCo は tau = gear * ctrl なので gear 倍過大）
+# 足裏カプセル化（v22）でも再測定して同値を確認済み。骨盤を空中に溶接するので
+# 足裏形状には依存しない測定。
 ISAAC_BASELINE = {
     "left_hip_pitch_joint": {"ratio": 0.809, "lag_deg": 26.7},
     "left_knee_joint": {"ratio": 0.857, "lag_deg": 24.2},

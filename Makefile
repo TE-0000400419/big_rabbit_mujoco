@@ -11,6 +11,7 @@
 #   make walk          # 歩行の実測（段 6、5 条件）
 #   make video         # 5 条件の mp4 を書き出す
 #   make gui           # GUI で起動（DISPLAY が必要）
+#   make foot          # 足裏の接触形状を確認（PNG）。FOOT_VIEW=1 でビューア
 #   make check         # test -> verify -> hold -> tracking -> walk を通す
 #   make clean
 # =======================
@@ -22,8 +23,8 @@ ISAAC_ROOT  ?= /home/pomiou/work/big_rabbit_isaac
 ISAAC_PYTHON?= /home/pomiou/work/env_isaaclab/bin/python
 
 # 採用 policy。差し替えるときはここだけ変える。
-POLICY_RUN    ?= big_rabbit_walk_v21_stride014
-POLICY_PARAMS ?= configs/big_rabbit_balance/big_rabbit_walk_v21_stride014_4096_500.params.yaml
+POLICY_RUN    ?= big_rabbit_walk_v22_sole56
+POLICY_PARAMS ?= configs/big_rabbit_balance/big_rabbit_walk_v22_sole56_4096_500.params.yaml
 CHECKPOINT    ?= $(shell ls -t $(ISAAC_ROOT)/logs/rsl_rl/big_rabbit_balance/*_$(POLICY_RUN)/model_499.pt 2>/dev/null | head -1)
 
 SIM        := $(BUILD_DIR)/big_rabbit_mujoco_sim
@@ -33,7 +34,7 @@ GAIT_PERIOD ?= 0.7
 SIM_SECONDS ?= 11
 
 .DEFAULT_GOAL := all
-.PHONY: all configure test export verify hold tracking walk video gui check clean
+.PHONY: all configure test export verify hold tracking walk video gui foot check clean
 
 all: configure
 	$(CMAKE) --build $(BUILD_DIR) -j$(shell nproc)
@@ -91,6 +92,13 @@ video: all
 
 gui: all
 	BIG_RABBIT_SCENE_XML=$(SCENE) ./$(SIM)
+
+# ---- 足裏の接触形状。group 3（衝突）を明示表示する。FOOT_VIEW=1 で対話ビューア ----
+foot:
+	@mkdir -p outputs
+	$(PYTHON) tools/view_foot_collision.py --scene $(SCENE) --mode collision $(if $(FOOT_VIEW),--interactive,)
+	@test -n "$(FOOT_VIEW)" || $(PYTHON) tools/view_foot_collision.py --scene $(SCENE) --mode overlay \
+	  --out $(CURDIR)/outputs/foot_overlay.png
 
 check: test verify hold tracking walk
 
