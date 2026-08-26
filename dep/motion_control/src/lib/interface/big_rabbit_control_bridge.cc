@@ -196,6 +196,16 @@ void BigRabbitControlBridge::ExecuteDriverStep() noexcept
     g_debug_data.driver_torque_ratio = g_motor_driver->torque_ratio();
 }
 
+// 接触判定　簡易版
+static void EstimateContact()
+{
+}
+
+// 高度推定　簡易版
+static void EstimateHeight()
+{
+}
+
 void BigRabbitControlBridge::ExecuteRLControl(long long step_count, bool reset) noexcept
 {
     // policy 1 step 分。直前に sim_main が SetSensorDataJoint() と

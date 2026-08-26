@@ -1,0 +1,5 @@
+# 静止姿勢
+make gui
+
+# 前進歩行
+BIG_RABBIT_MOTION_COMMAND_X=1 make gui
