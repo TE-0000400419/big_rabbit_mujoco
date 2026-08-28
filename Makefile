@@ -23,8 +23,8 @@ ISAAC_ROOT  ?= /home/pomiou/work/big_rabbit_isaac
 ISAAC_PYTHON?= /home/pomiou/work/env_isaaclab/bin/python
 
 # 採用 policy。差し替えるときはここだけ変える。
-POLICY_RUN    ?= big_rabbit_walk_v22_sole56
-POLICY_PARAMS ?= configs/big_rabbit_balance/big_rabbit_walk_v22_sole56_4096_500.params.yaml
+POLICY_RUN    ?= big_rabbit_walk_v24_robust
+POLICY_PARAMS ?= configs/big_rabbit_balance/big_rabbit_walk_v24_robust_4096_500.params.yaml
 CHECKPOINT    ?= $(shell ls -t $(ISAAC_ROOT)/logs/rsl_rl/big_rabbit_balance/*_$(POLICY_RUN)/model_499.pt 2>/dev/null | head -1)
 
 SIM        := $(BUILD_DIR)/big_rabbit_mujoco_sim

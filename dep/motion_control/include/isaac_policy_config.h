@@ -1,7 +1,7 @@
 #pragma once
 
 // tools/export_isaac_policy_headers.py が生成。手で編集しないこと。
-// Params: /home/pomiou/work/big_rabbit_isaac/configs/big_rabbit_balance/big_rabbit_walk_v22_sole56_4096_500.params.yaml
+// Params: /home/pomiou/work/big_rabbit_isaac/configs/big_rabbit_balance/big_rabbit_walk_v24_robust_4096_500.params.yaml
 
 #include <array>
 #include <cstdlib>

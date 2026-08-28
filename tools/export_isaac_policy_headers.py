@@ -50,6 +50,43 @@ OBS_LAYOUT = [
 ]
 
 
+def _provenance_lines(params: dict) -> list[str]:
+    """params の provenance ブロックをコメント行へ展開する。
+
+    実機に載せた重みが「どの版で、何を変えて、どういう性能だったか」を
+    ヘッダだけで追えるようにする。ブロックが無い版でも壊れない。
+    """
+    prov = params.get("provenance")
+    if not isinstance(prov, dict):
+        return ["// 来歴: params に provenance ブロックが無い版。", ""]
+    out = ["// ===== 来歴（params の provenance ブロックより）====="]
+    for key, label in (
+        ("version", "版"),
+        ("date", "学習日"),
+        ("stage", "段階"),
+        ("parent", "親の版"),
+        ("changed", "親からの変更点"),
+        ("training", "学習条件"),
+        ("verdict", "判定"),
+    ):
+        value = prov.get(key)
+        if value is not None:
+            out.append(f"//   {label}: {value}")
+    measured = prov.get("measured")
+    if isinstance(measured, dict):
+        out += ["//", "//   実測（5 条件）:"]
+        for cond, metrics in measured.items():
+            if isinstance(metrics, dict):
+                body = "  ".join(f"{k}={v}" for k, v in metrics.items())
+                out.append(f"//     {cond:<10} {body}")
+    for key, label in (("caveat", "留意"), ("notes", "未対応")):
+        value = prov.get(key)
+        if value is not None:
+            out.append(f"//   {label}: {value}")
+    out += ["// " + "=" * 48, ""]
+    return out
+
+
 def _fmt(value: float) -> str:
     return f"{float(value):.9e}f"
 
@@ -85,7 +122,7 @@ def _require(state: dict, key: str) -> torch.Tensor:
 
 
 def export_weights(checkpoint: Path, output: Path, params_path: Path,
-                   gait_frequency_hz: float) -> tuple[int, int, int]:
+                   gait_frequency_hz: float, params: dict) -> tuple[int, int, int]:
     data = torch.load(checkpoint, map_location="cpu", weights_only=False)
     state = data.get("model_state_dict")
     if state is None:
@@ -142,6 +179,8 @@ def export_weights(checkpoint: Path, output: Path, params_path: Path,
         f"// Params: {params_path}",
         f"// 構造: obs{obs_dim} -> {hidden_dim} -> {hidden_dim} -> {hidden_dim} -> action{action_dim},"
         " ELU, RSL-RL EmpiricalNormalization",
+        "//",
+        *_provenance_lines(params),
         "//",
         "// observation の並び（Isaac Lab の Active Observation Terms が正本）:",
     ]
@@ -403,7 +442,7 @@ def main() -> int:
     config = args.output_dir / "isaac_policy_config.h"
     walk_reference = args.output_dir / "isaac_walk_reference.h"
 
-    obs_dim, action_dim, hidden_dim = export_weights(checkpoint, weights, params_path, gait_frequency_hz)
+    obs_dim, action_dim, hidden_dim = export_weights(checkpoint, weights, params_path, gait_frequency_hz, params)
     export_config(params, config, params_path, obs_dim, action_dim, hidden_dim, gait_frequency_hz)
     export_reference(params, isaac_root, walk_reference)
 
