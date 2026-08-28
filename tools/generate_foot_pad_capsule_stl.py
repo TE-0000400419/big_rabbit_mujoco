@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Generate half-capsule foot-pad visual STL files from MuJoCo geoms.
+"""Generate printable half-capsule foot-pad shell STL files from MuJoCo geoms.
 
-The curved, exposed half exactly follows the collision capsule; the other half
-is cut at the attachment plane and closed with a flat face.  Mesh coordinates
-are written in the unit implied by the matching ``<mesh scale=...>`` asset (mm
-in the current model), while the capsule coordinates themselves are in metres.
+The outer curved half exactly follows the collision capsule.  The attachment
+plane is left open, and an inward-offset half capsule plus a flat rim form a
+watertight shell.  Mesh coordinates are written in the unit implied by the
+matching ``<mesh scale=...>`` asset (mm in the current model), while the capsule
+coordinates themselves are in metres.
 """
 
 from __future__ import annotations
@@ -80,15 +81,15 @@ def parse_floats(text: str, expected: int, attribute: str) -> tuple[float, ...]:
     return values
 
 
-def half_capsule_mesh(
+def half_capsule_surface(
     point_a: Vec3,
     point_b: Vec3,
     radius: float,
     down_direction: Vec3,
     radial_segments: int,
     hemisphere_segments: int,
-) -> tuple[list[Vec3], list[tuple[int, int, int]]]:
-    """Return the exposed half of a capsule, closed at its attachment plane."""
+) -> tuple[list[Vec3], list[tuple[int, int, int]], list[int], Vec3]:
+    """Return an open half-capsule curved surface and its cut-plane boundary."""
     if radius <= 0.0:
         raise ValueError("capsule 半径は正でなければなりません")
     if radial_segments < 8 or hemisphere_segments < 2:
@@ -161,47 +162,124 @@ def half_capsule_mesh(
         if dot(normal, sub(centroid, closest)) < 0.0:
             faces[index] = (face[0], face[2], face[1])
 
-    # Close the cut with a flat 2-D capsule face.  Its boundary consists of
-    # both open sides of the curved grid plus the two axial poles.
-    cut_center = len(vertices)
-    vertices.append(mul(add(point_a, point_b), 0.5))
+    # The boundary is a 2-D capsule on the attachment plane.  A shell connects
+    # this loop to the corresponding loop of its inner offset surface.
     boundary = (
         [0]
         + [ring[0] for ring in rings]
         + [pole_b]
         + [ring[-1] for ring in reversed(rings)]
     )
-    flat_outward = mul(down, -1.0)
-    for index, start in enumerate(boundary):
-        end = boundary[(index + 1) % len(boundary)]
-        face = (cut_center, start, end)
-        triangle = tuple(vertices[vertex] for vertex in face)
-        normal = cross(sub(triangle[1], triangle[0]), sub(triangle[2], triangle[0]))
-        if dot(normal, flat_outward) < 0.0:
-            face = (cut_center, end, start)
-        faces.append(face)
-
-    validate_topology(vertices, faces)
-    validate_surface(vertices[:cut_center], point_a, point_b, radius)
+    validate_surface(vertices, point_a, point_b, radius)
     for vertex in vertices:
         if dot(sub(vertex, point_a), down) < -1.0e-9:
             raise ValueError("平面より上側に頂点があります")
+    return vertices, faces, boundary, down
+
+
+def half_capsule_shell_mesh(
+    point_a: Vec3,
+    point_b: Vec3,
+    radius: float,
+    wall_thickness: float,
+    down_direction: Vec3,
+    radial_segments: int,
+    hemisphere_segments: int,
+) -> tuple[list[Vec3], list[tuple[int, int, int]]]:
+    """Return a watertight, open-at-the-top half-capsule shell."""
+    if wall_thickness <= 0.0 or wall_thickness >= radius:
+        raise ValueError(
+            f"肉厚は 0 より大きく半径未満でなければなりません: "
+            f"thickness={wall_thickness}, radius={radius}"
+        )
+
+    outer_vertices, outer_faces, outer_boundary, down = half_capsule_surface(
+        point_a,
+        point_b,
+        radius,
+        down_direction,
+        radial_segments,
+        hemisphere_segments,
+    )
+    inner_radius = radius - wall_thickness
+    inner_vertices, inner_faces, inner_boundary, _ = half_capsule_surface(
+        point_a,
+        point_b,
+        inner_radius,
+        down_direction,
+        radial_segments,
+        hemisphere_segments,
+    )
+    if len(outer_vertices) != len(inner_vertices) or len(outer_boundary) != len(inner_boundary):
+        raise ValueError("外面と内面のトポロジーが一致しません")
+
+    inner_offset = len(outer_vertices)
+    vertices = outer_vertices + inner_vertices
+    # Outer normals point away from the capsule.  Inner normals must point
+    # into the cavity, so reverse their winding.
+    faces = list(outer_faces)
+    faces.extend(
+        (face[0] + inner_offset, face[2] + inner_offset, face[1] + inner_offset)
+        for face in inner_faces
+    )
+
+    # Bridge the two cut-plane loops.  This annular face is the 5 mm-wide rim
+    # around the opening; its outward normal points opposite the solid's down.
+    flat_outward = mul(down, -1.0)
+    for index, outer_start in enumerate(outer_boundary):
+        next_index = (index + 1) % len(outer_boundary)
+        outer_end = outer_boundary[next_index]
+        inner_start = inner_boundary[index] + inner_offset
+        inner_end = inner_boundary[next_index] + inner_offset
+        rim_faces = [
+            (outer_start, outer_end, inner_end),
+            (outer_start, inner_end, inner_start),
+        ]
+        for face in rim_faces:
+            triangle = tuple(vertices[vertex] for vertex in face)
+            normal = cross(sub(triangle[1], triangle[0]), sub(triangle[2], triangle[0]))
+            if dot(normal, flat_outward) < 0.0:
+                face = (face[0], face[2], face[1])
+            faces.append(face)
+
+    max_thickness_error = max(
+        abs(norm(sub(outer, inner)) - wall_thickness)
+        for outer, inner in zip(outer_vertices, inner_vertices)
+    )
+    if max_thickness_error > 1.0e-9:
+        raise ValueError(f"肉厚が一定ではありません: error={max_thickness_error:.3e} m")
+    validate_topology(vertices, faces)
+    validate_winding(vertices, faces)
     return vertices, faces
 
 
 def validate_topology(vertices: Sequence[Vec3], faces: Sequence[tuple[int, int, int]]) -> None:
     edges: dict[tuple[int, int], int] = {}
+    edge_directions: dict[tuple[int, int], int] = {}
     for face in faces:
         if len(set(face)) != 3:
             raise ValueError(f"縮退した三角形があります: {face}")
         for start, end in zip(face, (face[1], face[2], face[0])):
             edge = tuple(sorted((start, end)))
             edges[edge] = edges.get(edge, 0) + 1
+            edge_directions[edge] = edge_directions.get(edge, 0) + (1 if (start, end) == edge else -1)
     invalid = [edge for edge, count in edges.items() if count != 2]
     if invalid:
         raise ValueError(f"STL が閉曲面ではありません: invalid_edges={len(invalid)}")
+    inconsistent = [edge for edge, direction in edge_directions.items() if direction != 0]
+    if inconsistent:
+        raise ValueError(f"隣接面の向きが一致しません: invalid_edges={len(inconsistent)}")
     if max(index for face in faces for index in face) >= len(vertices):
         raise ValueError("三角形が存在しない頂点を参照しています")
+
+
+def validate_winding(vertices: Sequence[Vec3], faces: Sequence[tuple[int, int, int]]) -> None:
+    signed_volume = sum(
+        dot(vertices[face[0]], cross(vertices[face[1]], vertices[face[2]])) / 6.0
+        for face in faces
+    )
+    if signed_volume <= 0.0:
+        raise ValueError(f"面の向きが反転しています: signed_volume={signed_volume:.6e} m^3")
 
 
 def validate_surface(vertices: Sequence[Vec3], point_a: Vec3, point_b: Vec3, radius: float) -> None:
@@ -232,7 +310,7 @@ def triangles(
 
 
 def binary_stl(name: str, mesh_triangles: Sequence[Triangle]) -> bytes:
-    header = f"big_rabbit {name} half capsule".encode("ascii")[:80].ljust(80, b"\0")
+    header = f"big_rabbit {name} half capsule shell".encode("ascii")[:80].ljust(80, b"\0")
     payload = bytearray(header + struct.pack("<I", len(mesh_triangles)))
     for triangle in mesh_triangles:
         edge_a = sub(triangle[1], triangle[0])
@@ -254,7 +332,13 @@ def write_atomic(path: Path, payload: bytes) -> None:
     temporary.replace(path)
 
 
-def generate(xml_path: Path, side: str, radial_segments: int, hemisphere_segments: int) -> None:
+def generate(
+    xml_path: Path,
+    side: str,
+    wall_thickness: float,
+    radial_segments: int,
+    hemisphere_segments: int,
+) -> None:
     root = ET.parse(xml_path).getroot()
     compiler = root.find("compiler")
     mesh_dir = xml_path.parent / (compiler.get("meshdir", ".") if compiler is not None else ".")
@@ -288,8 +372,14 @@ def generate(xml_path: Path, side: str, radial_segments: int, hemisphere_segment
     point_b: Vec3 = (fromto[3], fromto[4], fromto[5])
     scale: Vec3 = (scale_values[0], scale_values[1], scale_values[2])
     down = quaternion_rotate(contact_quat, (0.0, 0.0, -1.0))
-    vertices, faces = half_capsule_mesh(
-        point_a, point_b, size[0], down, radial_segments, hemisphere_segments
+    vertices, faces = half_capsule_shell_mesh(
+        point_a,
+        point_b,
+        size[0],
+        wall_thickness,
+        down,
+        radial_segments,
+        hemisphere_segments,
     )
     mesh_triangles = triangles(vertices, faces, scale)
     output_path = mesh_dir / asset.get("file")
@@ -303,19 +393,28 @@ def generate(xml_path: Path, side: str, radial_segments: int, hemisphere_segment
     chord_error = max(radial_chord_error, hemisphere_chord_error)
     print(
         f"{output_path}: triangles={len(faces)}, radius={size[0] * 1000:.1f} mm, "
+        f"inner_radius={(size[0] - wall_thickness) * 1000:.1f} mm, "
+        f"wall={wall_thickness * 1000:.1f} mm, "
         f"axis={axis_length * 1000:.1f} mm, total={((axis_length + 2.0 * size[0]) * 1000):.1f} mm, "
-        f"half=down, max_chord_error<={chord_error * 1000:.3f} mm"
+        f"open=attachment_plane, max_chord_error<={chord_error * 1000:.3f} mm"
     )
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--xml", type=Path, default=DEFAULT_XML)
+    parser.add_argument("--wall-thickness-mm", type=float, default=5.0)
     parser.add_argument("--radial-segments", type=int, default=32)
     parser.add_argument("--hemisphere-segments", type=int, default=16)
     args = parser.parse_args()
     for side in ("left", "right"):
-        generate(args.xml.resolve(), side, args.radial_segments, args.hemisphere_segments)
+        generate(
+            args.xml.resolve(),
+            side,
+            args.wall_thickness_mm * 0.001,
+            args.radial_segments,
+            args.hemisphere_segments,
+        )
 
 
 if __name__ == "__main__":
