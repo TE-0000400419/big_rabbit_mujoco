@@ -59,6 +59,15 @@ def _provenance_lines(params: dict) -> list[str]:
     prov = params.get("provenance")
     if not isinstance(prov, dict):
         return ["// 来歴: params に provenance ブロックが無い版。", ""]
+    # 版名の食い違いを弾く。v22 は run params を前の版から引き継いだまま
+    # 中身を直し忘れて 25 mm 低い目標高さで学習してしまった。同種の事故を防ぐ。
+    version = str(prov.get("version", ""))
+    name = str(params.get("name", ""))
+    if version and name and version not in name:
+        raise ValueError(
+            f"provenance.version '{version}' が params の name '{name}' に含まれない。"
+            " 前の版から provenance をコピーして直し忘れていないか確認する"
+        )
     out = ["// ===== 来歴（params の provenance ブロックより）====="]
     for key, label in (
         ("version", "版"),
