@@ -3,9 +3,10 @@
 
 The outer curved half exactly follows the collision capsule.  The attachment
 plane is left open, and an inward-offset half capsule plus a flat rim form a
-watertight shell.  Mesh coordinates are written in the unit implied by the
-matching ``<mesh scale=...>`` asset (mm in the current model), while the capsule
-coordinates themselves are in metres.
+watertight shell.  A separate solid half-capsule core is also generated at a
+configurable inward offset.  Mesh coordinates are written in the unit implied
+by the matching ``<mesh scale=...>`` asset (mm in the current model), while the
+capsule coordinates themselves are in metres.
 """
 
 from __future__ import annotations
@@ -253,6 +254,40 @@ def half_capsule_shell_mesh(
     return vertices, faces
 
 
+def solid_half_capsule_mesh(
+    point_a: Vec3,
+    point_b: Vec3,
+    radius: float,
+    down_direction: Vec3,
+    radial_segments: int,
+    hemisphere_segments: int,
+) -> tuple[list[Vec3], list[tuple[int, int, int]]]:
+    """Return a watertight solid half capsule with a flat cut face."""
+    vertices, faces, boundary, down = half_capsule_surface(
+        point_a,
+        point_b,
+        radius,
+        down_direction,
+        radial_segments,
+        hemisphere_segments,
+    )
+    cut_center = len(vertices)
+    vertices.append(mul(add(point_a, point_b), 0.5))
+    flat_outward = mul(down, -1.0)
+    for index, start in enumerate(boundary):
+        end = boundary[(index + 1) % len(boundary)]
+        face = (cut_center, start, end)
+        triangle = tuple(vertices[vertex] for vertex in face)
+        normal = cross(sub(triangle[1], triangle[0]), sub(triangle[2], triangle[0]))
+        if dot(normal, flat_outward) < 0.0:
+            face = (cut_center, end, start)
+        faces.append(face)
+
+    validate_topology(vertices, faces)
+    validate_winding(vertices, faces)
+    return vertices, faces
+
+
 def validate_topology(vertices: Sequence[Vec3], faces: Sequence[tuple[int, int, int]]) -> None:
     edges: dict[tuple[int, int], int] = {}
     edge_directions: dict[tuple[int, int], int] = {}
@@ -309,8 +344,8 @@ def triangles(
     return result  # type: ignore[return-value]
 
 
-def binary_stl(name: str, mesh_triangles: Sequence[Triangle]) -> bytes:
-    header = f"big_rabbit {name} half capsule shell".encode("ascii")[:80].ljust(80, b"\0")
+def binary_stl(name: str, kind: str, mesh_triangles: Sequence[Triangle]) -> bytes:
+    header = f"big_rabbit {name} {kind}".encode("ascii")[:80].ljust(80, b"\0")
     payload = bytearray(header + struct.pack("<I", len(mesh_triangles)))
     for triangle in mesh_triangles:
         edge_a = sub(triangle[1], triangle[0])
@@ -336,6 +371,7 @@ def generate(
     xml_path: Path,
     side: str,
     wall_thickness: float,
+    core_offset: float,
     radial_segments: int,
     hemisphere_segments: int,
 ) -> None:
@@ -367,6 +403,11 @@ def generate(
     scale_values = parse_floats(asset.get("scale", "1 1 1"), 3, f"{mesh_name}.scale")
     if any(value <= 0.0 for value in scale_values):
         raise ValueError(f"mesh scale は正でなければなりません: {scale_values}")
+    if core_offset <= wall_thickness or core_offset >= size[0]:
+        raise ValueError(
+            f"コアのオフセットは肉厚より大きく半径未満でなければなりません: "
+            f"core_offset={core_offset}, wall={wall_thickness}, radius={size[0]}"
+        )
 
     point_a: Vec3 = (fromto[0], fromto[1], fromto[2])
     point_b: Vec3 = (fromto[3], fromto[4], fromto[5])
@@ -383,7 +424,20 @@ def generate(
     )
     mesh_triangles = triangles(vertices, faces, scale)
     output_path = mesh_dir / asset.get("file")
-    write_atomic(output_path, binary_stl(mesh_name or side, mesh_triangles))
+    write_atomic(output_path, binary_stl(mesh_name or side, "half capsule shell", mesh_triangles))
+
+    core_radius = size[0] - core_offset
+    core_vertices, core_faces = solid_half_capsule_mesh(
+        point_a,
+        point_b,
+        core_radius,
+        down,
+        radial_segments,
+        hemisphere_segments,
+    )
+    core_triangles = triangles(core_vertices, core_faces, scale)
+    core_path = mesh_dir / f"{side.upper()}_FOOT_PAD_CORE.STL"
+    write_atomic(core_path, binary_stl(f"{side}_foot_pad_core", "solid half capsule", core_triangles))
 
     axis_length = norm(sub(point_b, point_a))
     radial_chord_error = size[0] * (1.0 - math.cos(math.pi / (2.0 * radial_segments)))
@@ -398,12 +452,25 @@ def generate(
         f"axis={axis_length * 1000:.1f} mm, total={((axis_length + 2.0 * size[0]) * 1000):.1f} mm, "
         f"open=attachment_plane, max_chord_error<={chord_error * 1000:.3f} mm"
     )
+    core_total_length = axis_length + 2.0 * core_radius
+    clearance = core_offset - wall_thickness
+    print(
+        f"{core_path}: triangles={len(core_faces)}, radius={core_radius * 1000:.1f} mm, "
+        f"offset={core_offset * 1000:.1f} mm, clearance={clearance * 1000:.1f} mm, "
+        f"axis={axis_length * 1000:.1f} mm, total={core_total_length * 1000:.1f} mm, solid=yes"
+    )
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--xml", type=Path, default=DEFAULT_XML)
-    parser.add_argument("--wall-thickness-mm", type=float, default=5.0)
+    parser.add_argument("--wall-thickness-mm", type=float, default=5.0, help="シェル肉厚 [mm]")
+    parser.add_argument(
+        "--core-offset-mm",
+        type=float,
+        default=6.0,
+        help="元の外表面から中実コア表面までの内向きオフセット [mm]",
+    )
     parser.add_argument("--radial-segments", type=int, default=32)
     parser.add_argument("--hemisphere-segments", type=int, default=16)
     args = parser.parse_args()
@@ -412,6 +479,7 @@ def main() -> None:
             args.xml.resolve(),
             side,
             args.wall_thickness_mm * 0.001,
+            args.core_offset_mm * 0.001,
             args.radial_segments,
             args.hemisphere_segments,
         )
