@@ -10,7 +10,19 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(COMMON_INCLUDE_DIRS
     ${CMAKE_SOURCE_DIR}/include
     ${CMAKE_SOURCE_DIR}/dep/motion_control/include
+    # dep/Eigen（同梱）を <Eigen/Dense> で引くため。運動学モデル
+    # big_rabbit_robot_model.h が使う。
+    ${CMAKE_SOURCE_DIR}/dep
 )
+
+# 接地判定と骨盤高を「実機相当の推定」に切り替える。
+# OFF（既定）なら sim の値（MuJoCo の接触法線力と骨盤 world z 真値）を使う。
+# ON なら bridge の EstimateContact / EstimateHeight（力センサも高さセンサも使わない）。
+option(BIG_RABBIT_STATE_ESTIMATION "接地・骨盤高を実機相当の推定で作る" OFF)
+if(BIG_RABBIT_STATE_ESTIMATION)
+    add_compile_definitions(BIG_RABBIT_USE_STATE_ESTIMATION)
+    message(STATUS "state estimation: ON（実機相当。力センサ・骨盤高センサを使わない）")
+endif()
 
 # CONFIGURE_DEPENDS を付けておくと、ファイルを足したときに cmake の再実行を忘れても
 # ビルド時に glob が再評価される（付けないとリンクエラーになって原因が分かりにくい）。

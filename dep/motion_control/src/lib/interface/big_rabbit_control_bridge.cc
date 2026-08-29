@@ -1,7 +1,9 @@
 #include "big_rabbit_control_bridge.h"
 
+#include <algorithm>
 #include <cmath>
 
+#include "big_rabbit_robot_model.h"
 #include "control_info.h"
 #include "isaac_policy_config.h"
 #include "isaac_policy_infer.h"
@@ -28,6 +30,16 @@ namespace
 
     BigRabbitControlBridge::IsaacPolicyDebugData g_debug_data;
     std::array<float, 3> g_motion_command{};
+
+    // 接地とみなす推定床反力 [N]（骨盤基準 Z）。policy の閾値（kFootContactThresholdN = 1 N）は
+    // 力センサ生値に対するもので、こちらはトルクからの推定なのでノイズ床が高い。別の値を持つ。
+    //
+    // 20 N の根拠（sim で MuJoCo の実接地と突き合わせた実測、11 s x 4 条件）:
+    //   遊脚の推定値は平均 +2.7 N・最大 15.1 N、接地中は平均 62 N。
+    //   閾値 20 N で一致率 98.4-100%（誤検出 0.00%、見逃し 1.3-1.6%）。
+    //   15 N だと前進はわずかに良いが旋回で誤検出が出るので 20 N を採る。
+    //   学習側 v24 が入れた接地ノイズ（miss 0.05 / false 0.02）より十分小さい。
+    constexpr float kContactThresholdN = 20.0f;
 
     // RSL-RL の actor 観測には action 履歴が 2 段入っている。
     // previous_action が 2 step 前、current_action が 1 step 前。初回はどちらもゼロ。
@@ -196,14 +208,134 @@ void BigRabbitControlBridge::ExecuteDriverStep() noexcept
     g_debug_data.driver_torque_ratio = g_motor_driver->torque_ratio();
 }
 
-// 接触判定　簡易版
-static void EstimateContact()
+// 共有ロボットモデルの更新（順運動学）
+void BigRabbitControlBridge::ExecuteRobotUpdate() noexcept
 {
+    // 関節角は MJCF / Isaac / policy と同じ定義なので、センサ生値をそのまま渡せる
+    // （モータ次元の符号・減速比は SetSensorDataMotor が既に戻している）。
+    //
+    // IMU の姿勢を渡すのは **骨盤高の逆算にだけ** 必要だから。
+    // 接地判定は骨盤固定座標で完結するので姿勢は要らない。
+    // 渡さない（nullptr）と重力基準の量は「直立」を仮定した値になる。
+    BigRabbitRobotUpdate(g_control_info.joint_position.data(),
+                         g_control_info.imu_orientation.data());
+}
+
+// 接触判定　簡易版
+void BigRabbitControlBridge::EstimateContact(std::array<float, kJointAxisNum> &reference_rad, float &left_contact, float &right_contact)
+{
+    /*
+    ・作業空間力と関節トルクの関係
+    τ^T dq=F^T dx  dx/dt=J*dq/dt
+    τ^T dq=F^T (J dq) -> J^T F = τ
+    F = #J^T*τ 転置ヤコビ行列の疑似逆行列＊関節トルク
+
+    ・転置ヤコビはどう作るか？
+    ヤコビ行列の座標（作業空間の座標をどう取るかに依存）
+    →まずはpevis骨盤をベースとする（胴体を固定する）
+
+    ・幾何ヤコビ行列を構成する
+    ※並進成分なのでどう作っても良いが、幾何ベースで作る
+    Jgeom_trans=[pel_z1 x (pel_p_E - pel_p_1) , ... , pel_zn x (pel_p_E - pel_p_n)]
+    →　骨盤基準各関節回転軸　pel_z_i
+    　　骨盤基準接触フレーム位置　pel_p_E
+    　　骨盤基準各関節位置　　pel_p_i
+
+    ・骨盤固定座標基準Z方向成分が一定以上で接触とする
+
+
+    */
+
+    // ヤコビと各関節位置・回転軸は ExecuteRobotUpdate が作ってある（big_rabbit_robot_model.h）。
+    const BigRabbitState &model = BigRabbitRobotState();
+
+    // reference_rad は今は使わない。ドライバがトルクを返さない機体で
+    // tau = Kp(q_ref - q) - Kd*dq として推定に使うための引数（実機で必要になったら使う）。
+    (void)reference_rad;
+
+    float *contact_out[BIG_RABBIT_LEG_NUM] = {&left_contact, &right_contact};
+    for (int side = 0; side < BIG_RABBIT_LEG_NUM; side++)
+    {
+        const BigRabbitLegState &leg = model.state[side];
+
+        // 脚 5 関節の実測トルク。sim では MuJoCo の qfrc_actuator、実機ではドライバの報告値。
+        Eigen::Matrix<float, BIG_RABBIT_LEG_JOINT_NUM, 1> tau;
+        for (int i = 0; i < BIG_RABBIT_LEG_JOINT_NUM; i++)
+        {
+            tau(i) = g_control_info.joint_torque[side * BIG_RABBIT_LEG_JOINT_NUM + i];
+        }
+
+        // 脚自身の重力トルク。これを入れないと推定値が実測から大きくずれる
+        // （sim 実測: 入れると接地中 62.3 N で真値 63.5 N とほぼ一致、
+        //   入れないと 51.0 N、遊脚も 0 でなく -10.1 N になる）。
+        //   tau_g(i) = sum_j (z_i x (com_j - p_i)) . (m_j g)    g は骨盤基準の重力ベクトル
+        Eigen::Matrix<float, BIG_RABBIT_LEG_JOINT_NUM, 1> tau_gravity;
+        tau_gravity.setZero();
+        const Vector3f gravity_vector = 9.81f * model.gravity_base; // 骨盤基準 [m/s^2]
+        for (int i = 0; i < BIG_RABBIT_LEG_JOINT_NUM; i++)
+        {
+            for (int j = i; j < BIG_RABBIT_LEG_JOINT_NUM; j++) // i より先のリンクだけが乗る
+            {
+                const Vector3f arm = leg.com_base[j] - leg.p_base[i];
+                const Vector3f weight = model.leg[side].l[j].m * gravity_vector;
+                tau_gravity(i) += leg.z_base[i].cross(arm).dot(weight);
+            }
+        }
+
+        // 骨盤を固定した準静的つり合い（仮想仕事）:
+        //   tau . dq + sum_j (m_j g) . dp_com_j + F . dp_E = 0
+        //   -> tau + tau_gravity + J^T F = 0
+        //   -> F = -pinv(J^T) (tau + tau_gravity)          F = 床が足に与える力（床反力）
+        // 並進 3 成分だけ見る（足裏まわりのモーメントは取らない）。
+        // COD は特異点（膝が伸び切る等）でも破綻しない疑似逆。
+        const Eigen::Matrix<float, 3, BIG_RABBIT_LEG_JOINT_NUM> jacobian = leg.J_sole.topRows<3>();
+        const Vector3f ground_reaction =
+            -jacobian.transpose().completeOrthogonalDecomposition().solve(tau + tau_gravity);
+
+        *contact_out[side] =
+            (ground_reaction.z() > kContactThresholdN) ? 1.0f : 0.0f;
+    }
 }
 
 // 高度推定　簡易版
-static void EstimateHeight()
+void BigRabbitControlBridge::EstimateHeight(float left_contact, float right_contact, float &base_height_m)
 {
+    /*
+    ・骨盤高に対応するセンサは無いので、接地している足から逆算する。
+    ・ExecuteRobotUpdate が、足裏カプセルの接地点を **重力基準**（原点は骨盤のまま、
+      姿勢だけ IMU で回した座標）で作ってある。接地点は地面の上にあるので、
+      その z は -（骨盤の高さ）になる。よって符号を反転すれば骨盤高。
+    ・平地の前提。傾斜・段差では成り立たない。
+    */
+
+    const BigRabbitState &model = BigRabbitRobotState();
+    const float contact[BIG_RABBIT_LEG_NUM] = {left_contact, right_contact};
+
+    float lowest = 1.0e9f;
+    bool any_contact = false;
+    for (int side = 0; side < BIG_RABBIT_LEG_NUM; side++)
+    {
+        if (contact[side] < 0.5f)
+        {
+            continue;
+        }
+        any_contact = true;
+        lowest = std::min(lowest, model.state[side].p_contact_a_grav.z());
+        lowest = std::min(lowest, model.state[side].p_contact_b_grav.z());
+    }
+
+    if (!any_contact)
+    {
+        // 両脚とも遊脚（歩容の flight phase、または接地判定の見逃し）。
+        // 一番低い点を接地しているとみなす。実際より低めに出るが破綻はしない。
+        for (int side = 0; side < BIG_RABBIT_LEG_NUM; side++)
+        {
+            lowest = std::min(lowest, model.state[side].p_contact_a_grav.z());
+            lowest = std::min(lowest, model.state[side].p_contact_b_grav.z());
+        }
+    }
+
+    base_height_m = -lowest;
 }
 
 void BigRabbitControlBridge::ExecuteRLControl(long long step_count, bool reset) noexcept
@@ -235,6 +367,11 @@ void BigRabbitControlBridge::ExecuteRLControl(long long step_count, bool reset) 
 
     */
 
+    // ---- 共有ロボットモデルを先に更新する ----
+    // 接地判定（EstimateContact）も骨盤高（EstimateHeight）もこの結果を見るので、
+    // obs54 を組み立てるより前に済ませておく。
+    ExecuteRobotUpdate();
+
     if (reset)
     {
         g_previous_action.fill(0.0f);
@@ -250,7 +387,23 @@ void BigRabbitControlBridge::ExecuteRLControl(long long step_count, bool reset) 
 
     // ---- センサ生値 -> observation の変換。ここが sim と実機で共通の経路 ----
     const auto projected_gravity = ProjectedGravityFromStore();
+
+    // ---- 接地と骨盤高をどこから取るか ----
+    // この 2 つだけが sim と実機で供給元の違うセンサ。ほかは同じ経路を通る。
+    //   既定（マクロ無し）: sim の値。MuJoCo の接触法線力と骨盤 world 真値。
+    //   BIG_RABBIT_USE_STATE_ESTIMATION: 実機相当。力センサも骨盤高センサも使わず、
+    //                                    関節トルクと運動学から推定する。
+    // 切り替えは cmake -DBIG_RABBIT_STATE_ESTIMATION=ON（Makefile なら make ESTIMATE=ON）。
+#ifdef BIG_RABBIT_USE_STATE_ESTIMATION
+    std::array<float, 2> feet_contact{};
+    // トルクの元になった位置目標（前回 step のもの）を渡す。
+    EstimateContact(g_control_info.joint_position_ref, feet_contact[0], feet_contact[1]);
+    float base_height_m = 0.0f;
+    EstimateHeight(feet_contact[0], feet_contact[1], base_height_m);
+#else
     const auto feet_contact = FeetContactFromStore();
+    const float base_height_m = g_control_info.base_height_m;
+#endif
 
     const auto &crouch = isaac_policy::kCrouchJointPositionRad;
     std::array<float, isaac_policy::kObsDim> obs{};
@@ -261,8 +414,8 @@ void BigRabbitControlBridge::ExecuteRLControl(long long step_count, bool reset) 
     // obs は index を明示して埋める。obs_index++ にすると並びのずれが見えなくなる。
     // 並びの正本は Isaac Lab の Active Observation Terms 出力。
 
-    // obs[0]: base height [m]。センサが無いので外から与えられた値をそのまま使う。
-    obs[0] = g_control_info.base_height_m;
+    // obs[0]: base height [m]。sim は真値、実機相当では EstimateHeight の推定値。
+    obs[0] = base_height_m;
 
     // obs[1..3]: projected gravity（body frame で見た world 重力方向）。clip は変換側で済み。
     obs[1] = projected_gravity[0];

@@ -21,3 +21,6 @@ __pycache__/
 # OS
 .DS_Store
 Thumbs.db
+
+# tools/30_push_test.py が作る押し板シーン（--keep-scene のときだけ残る）
+robotmodel/big_rabbit/_push_*.xml

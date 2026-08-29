@@ -133,4 +133,20 @@ public:
     std::array<float, 2> GetFeetContact() const noexcept;
 
     IsaacPolicyDebugData GetIsaacPolicyDebugData() const noexcept;
+
+    // ---- 状態推定 ----
+
+    /// 共有ロボットモデル（big_rabbit_robot_model.h）を最新のセンサ生値で更新する。
+    /// 順運動学を回し、骨盤基準の各関節位置・回転軸・足裏位置・足裏ヤコビ、
+    /// および重力基準の接地点を作る。ExecuteRLControl が obs を作る前に呼ぶ。
+    /// 結果は BigRabbitRobotState() でどこからでも読める。
+    void ExecuteRobotUpdate() noexcept;
+
+    /// 接地判定（実機相当）。足裏力センサを使わず、関節トルクと足裏ヤコビから床反力を推定する。
+    /// ExecuteRobotUpdate を先に呼んでおくこと。
+    void EstimateContact(std::array<float, kJointAxisNum> &reference_rad, float &left_contact, float &right_contact);
+
+    /// 骨盤高の推定（実機相当）。対応センサが無いので、接地脚の足裏位置から逆算する。
+    /// ExecuteRobotUpdate を先に呼んでおくこと。
+    void EstimateHeight(float left_contact, float right_contact, float &base_height_m);
 };
