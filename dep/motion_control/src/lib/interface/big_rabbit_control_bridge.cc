@@ -19,6 +19,15 @@ using big_rabbit::motion::NextState;
 using big_rabbit::motion::TorqueSet;
 using big_rabbit::motion::UpdateModule;
 
+// ---- 接地判定と骨盤高をどこから取るか ----
+// **既定は実機相当の推定（ハードコードで ON）**。実機に載る経路をそのまま sim でも回す。
+// sim の真値（MuJoCo の接触法線力と骨盤 world z）へ戻すのは、段 1-3 のクロス検証のように
+// 「与えたセンサ生値から obs54 が作れるか」を見るときだけ。そのときは
+// BIG_RABBIT_USE_SIM_TRUTH を定義する（make ESTIMATE=OFF / cmake -DBIG_RABBIT_SIM_TRUTH=ON）。
+#ifndef BIG_RABBIT_USE_SIM_TRUTH
+#define BIG_RABBIT_USE_STATE_ESTIMATION 1
+#endif
+
 namespace
 {
     ControlInfo g_control_info;
@@ -388,12 +397,8 @@ void BigRabbitControlBridge::ExecuteRLControl(long long step_count, bool reset) 
     // ---- センサ生値 -> observation の変換。ここが sim と実機で共通の経路 ----
     const auto projected_gravity = ProjectedGravityFromStore();
 
-    // ---- 接地と骨盤高をどこから取るか ----
+    // ---- 接地と骨盤高をどこから取るか（このファイル冒頭のマクロ定義を見る）----
     // この 2 つだけが sim と実機で供給元の違うセンサ。ほかは同じ経路を通る。
-    //   既定（マクロ無し）: sim の値。MuJoCo の接触法線力と骨盤 world 真値。
-    //   BIG_RABBIT_USE_STATE_ESTIMATION: 実機相当。力センサも骨盤高センサも使わず、
-    //                                    関節トルクと運動学から推定する。
-    // 切り替えは cmake -DBIG_RABBIT_STATE_ESTIMATION=ON（Makefile なら make ESTIMATE=ON）。
 #ifdef BIG_RABBIT_USE_STATE_ESTIMATION
     std::array<float, 2> feet_contact{};
     // トルクの元になった位置目標（前回 step のもの）を渡す。

@@ -15,13 +15,15 @@ set(COMMON_INCLUDE_DIRS
     ${CMAKE_SOURCE_DIR}/dep
 )
 
-# 接地判定と骨盤高を「実機相当の推定」に切り替える。
-# OFF（既定）なら sim の値（MuJoCo の接触法線力と骨盤 world z 真値）を使う。
-# ON なら bridge の EstimateContact / EstimateHeight（力センサも高さセンサも使わない）。
-option(BIG_RABBIT_STATE_ESTIMATION "接地・骨盤高を実機相当の推定で作る" OFF)
-if(BIG_RABBIT_STATE_ESTIMATION)
-    add_compile_definitions(BIG_RABBIT_USE_STATE_ESTIMATION)
-    message(STATUS "state estimation: ON（実機相当。力センサ・骨盤高センサを使わない）")
+# 接地判定と骨盤高は **既定で実機相当の推定**（bridge 側にハードコード）。
+# ここは opt-out スイッチで、ON にすると sim の真値
+# （MuJoCo の接触法線力と骨盤 world z）へ戻す。段 1-3 のクロス検証で使う。
+option(BIG_RABBIT_SIM_TRUTH "接地・骨盤高を sim の真値から取る（既定は実機相当の推定）" OFF)
+if(BIG_RABBIT_SIM_TRUTH)
+    add_compile_definitions(BIG_RABBIT_USE_SIM_TRUTH)
+    message(STATUS "接地・骨盤高: sim の真値（クロス検証用）")
+else()
+    message(STATUS "接地・骨盤高: 実機相当の推定（EstimateContact / EstimateHeight）")
 endif()
 
 # CONFIGURE_DEPENDS を付けておくと、ファイルを足したときに cmake の再実行を忘れても

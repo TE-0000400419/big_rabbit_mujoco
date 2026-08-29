@@ -13,7 +13,7 @@
 #   make gui           # GUI で起動（DISPLAY が必要）
 #   make foot          # 足裏の接触形状を確認（PNG）。FOOT_VIEW=1 でビューア
 #   make check         # test -> verify -> hold -> tracking -> walk を通す
-#   make ESTIMATE=ON walk   # 接地・骨盤高を実機相当の推定に切り替えて歩かせる
+#   make ESTIMATE=OFF walk  # 接地・骨盤高を sim の真値に戻して歩かせる（既定は推定）
 #   make clean
 # =======================
 
@@ -33,8 +33,10 @@ SCENE      := $(CURDIR)/robotmodel/big_rabbit/scene.xml
 SCENE_TRACK := $(CURDIR)/robotmodel/big_rabbit/scene_tracking.xml
 GAIT_PERIOD ?= 0.7
 
-# 接地判定と骨盤高の供給元。OFF = sim の真値、ON = 実機相当の推定（EstimateContact / EstimateHeight）。
-ESTIMATE ?= OFF
+# 接地判定と骨盤高の供給元。**既定は ON = 実機相当の推定**（bridge にハードコード）。
+# OFF にすると sim の真値（MuJoCo の接触法線力・骨盤 world z）へ戻す。
+ESTIMATE ?= ON
+SIM_TRUTH = $(if $(filter OFF off 0 no,$(ESTIMATE)),ON,OFF)
 SIM_SECONDS ?= 11
 
 .DEFAULT_GOAL := all
@@ -45,7 +47,7 @@ all: configure
 
 configure:
 	$(CMAKE) -S . -B $(BUILD_DIR) -DCMAKE_BUILD_TYPE=Release \
-	  -DBIG_RABBIT_STATE_ESTIMATION=$(ESTIMATE)
+	  -DBIG_RABBIT_SIM_TRUTH=$(SIM_TRUTH)
 
 test: all
 	./$(BUILD_DIR)/test_joint_motor_transform
@@ -108,7 +110,13 @@ foot:
 	@test -n "$(FOOT_VIEW)" || $(PYTHON) tools/view_foot_collision.py --scene $(SCENE) --mode overlay \
 	  --out $(CURDIR)/outputs/foot_overlay.png
 
-check: test verify hold tracking walk
+# 段 0-6 を通す。verify だけは sim の真値で回す必要があるので、
+# **sub-make に分ける**（同じ make の中だと all が 1 度しかビルドされず、
+# verify 用の ESTIMATE=OFF が反映されないため）。
+check:
+	$(MAKE) test
+	$(MAKE) ESTIMATE=OFF verify
+	$(MAKE) hold tracking walk
 
 clean:
 	rm -rf $(BUILD_DIR)
